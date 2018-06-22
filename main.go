@@ -26,6 +26,7 @@ var (
 	showVer = flag.Bool("v", false, "Show version")
 	verbose = flag.Int("verbose", 0, "Verbosity level")
 	service = flag.String("service", "dynamodb", "AWS Service: ec2, sdb, sns, sqs, ...")
+	sleep   = flag.Int("sleep", 0, "If specified, ping will be retried after that number of seconds")
 )
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -130,10 +131,11 @@ func CalcLatency(repeats int, useHTTP bool, service string) *AWSRegions {
 		{Service: service, Name: "US-East (Ohio)", Code: "us-east-2"},
 		{Service: service, Name: "US-West (California)", Code: "us-west-1"},
 		{Service: service, Name: "US-West (Oregon)", Code: "us-west-2"},
-		{Service: service, Name: "Canada (Ceentral)", Code: "ca-central-1"},
+		{Service: service, Name: "Canada (Central)", Code: "ca-central-1"},
 		{Service: service, Name: "Europe (Ireland)", Code: "eu-west-1"},
 		{Service: service, Name: "Europe (Frankfurt)", Code: "eu-central-1"},
 		{Service: service, Name: "Europe (London)", Code: "eu-west-2"},
+		{Service: service, Name: "Europe (Paris)", Code: "eu-west-3"},
 		{Service: service, Name: "Asia Pacific (Tokyo)", Code: "ap-northeast-1"},
 		{Service: service, Name: "Asia Pacific (Seoul)", Code: "ap-northeast-2"},
 		{Service: service, Name: "Asia Pacific (Singapore)", Code: "ap-southeast-1"},
@@ -226,9 +228,16 @@ func main() {
 		os.Exit(0)
 	}
 
-	regions := CalcLatency(*repeats, *useHTTP, *service)
-	lo := LatencyOutput{*verbose}
-	lo.Show(regions)
+	for {
+		fmt.Println("\nRunning awsping on", time.Now().Format(time.RFC850))
+		regions := CalcLatency(*repeats, *useHTTP, *service)
+		lo := LatencyOutput{*verbose}
+		lo.Show(regions)
+		if *sleep == 0 {
+			break
+		}
+		time.Sleep(time.Duration(*sleep) * time.Second)
+	}
 }
 
 func init() {
