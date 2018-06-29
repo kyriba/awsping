@@ -12,10 +12,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/cloudwatch"
 )
 
 var (
-	version   = "0.5.2"
+	version   = "0.6.0"
 	github    = "https://github.com/ekalinin/awsping"
 	useragent = fmt.Sprintf("AwsPing/%s (+%s)", version, github)
 )
@@ -27,6 +31,7 @@ var (
 	verbose = flag.Int("verbose", 0, "Verbosity level")
 	service = flag.String("service", "dynamodb", "AWS Service: ec2, sdb, sns, sqs, ...")
 	sleep   = flag.Int("sleep", 0, "If specified, ping will be retried after that number of seconds")
+	publish = flag.Bool("publish", false, "Publish latencies to CloudWatch")
 )
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -122,6 +127,26 @@ func (rs AWSRegions) Less(i, j int) bool {
 
 func (rs AWSRegions) Swap(i, j int) {
 	rs[i], rs[j] = rs[j], rs[i]
+}
+
+func (rs AWSRegions) renderMetricData() []*cloudwatch.MetricDatum {
+	metrics := make([]*cloudwatch.MetricDatum, 0, len(rs))
+	for _, r := range rs {
+		metrics = append(metrics,
+			&cloudwatch.MetricDatum{
+				MetricName: aws.String(r.Service),
+				Unit:       aws.String("Milliseconds"),
+				Value:      aws.Float64(r.GetLatency()),
+				Dimensions: []*cloudwatch.Dimension{
+					&cloudwatch.Dimension{
+						Name:  aws.String("Region"),
+						Value: aws.String(r.Code),
+					},
+				},
+			})
+	}
+	//fmt.Printf("Metrics to publish: %#v", metrics)
+	return metrics
 }
 
 // CalcLatency returns list of aws regions sorted by Latency
@@ -228,11 +253,33 @@ func main() {
 		os.Exit(0)
 	}
 
+	var cloudSVC *cloudwatch.CloudWatch
+	if *publish {
+		cloudSVC = initAWS()
+	}
+
+	hostname, _ := os.Hostname()
+	cloudNS := fmt.Sprintf("awsping/%s", hostname)
+
 	for {
 		fmt.Println("\nRunning awsping on", time.Now().Format(time.RFC850))
 		regions := CalcLatency(*repeats, *useHTTP, *service)
+
 		lo := LatencyOutput{*verbose}
 		lo.Show(regions)
+
+		if *publish {
+			fmt.Println("Publishing metrics to CloudWatch")
+			_, err := cloudSVC.PutMetricData(&cloudwatch.PutMetricDataInput{
+				Namespace:  aws.String(cloudNS),
+				MetricData: regions.renderMetricData(),
+			})
+			if err != nil {
+				fmt.Printf("Unable to publish metrics to CloudWatch: %s", err)
+				os.Exit(1)
+			}
+		}
+
 		if *sleep == 0 {
 			break
 		}
@@ -242,4 +289,9 @@ func main() {
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
+}
+
+func initAWS() *cloudwatch.CloudWatch {
+	sess := session.Must(session.NewSession())
+	return cloudwatch.New(sess)
 }
