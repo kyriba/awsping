@@ -31,7 +31,7 @@ var (
 	verbose = flag.Int("verbose", 0, "Verbosity level")
 	service = flag.String("service", "dynamodb", "AWS Service: ec2, sdb, sns, sqs, ...")
 	sleep   = flag.Int("sleep", 0, "If specified, ping will be retried after that number of seconds")
-	publish = flag.Bool("publish", false, "Publish latencies to CloudWatch")
+	publish = flag.String("publish", "", "Publish latencies to CloudWatch")
 )
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -254,12 +254,9 @@ func main() {
 	}
 
 	var cloudSVC *cloudwatch.CloudWatch
-	if *publish {
+	if *publish != "" {
 		cloudSVC = initAWS()
 	}
-
-	hostname, _ := os.Hostname()
-	cloudNS := fmt.Sprintf("awsping/%s", hostname)
 
 	for {
 		fmt.Println("\nRunning awsping on", time.Now().Format(time.RFC850))
@@ -268,10 +265,10 @@ func main() {
 		lo := LatencyOutput{*verbose}
 		lo.Show(regions)
 
-		if *publish {
+		if *publish != "" {
 			fmt.Println("Publishing metrics to CloudWatch")
 			_, err := cloudSVC.PutMetricData(&cloudwatch.PutMetricDataInput{
-				Namespace:  aws.String(cloudNS),
+				Namespace:  aws.String(fmt.Sprintf("awsping/%s", *publish)),
 				MetricData: regions.renderMetricData(),
 			})
 			if err != nil {
